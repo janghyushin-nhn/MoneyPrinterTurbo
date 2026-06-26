@@ -153,6 +153,7 @@ def save_config():
         _cfg["azure"] = azure
         _cfg["siliconflow"] = siliconflow
         _cfg["elevenlabs"] = elevenlabs
+        _cfg["openai_codex"] = openai_codex
         _cfg["ui"] = ui
         f.write(toml.dumps(_cfg))
 
@@ -164,6 +165,9 @@ proxy = _cfg.get("proxy", {})
 azure = _cfg.get("azure", {})
 siliconflow = _cfg.get("siliconflow", {})
 elevenlabs = _cfg.get("elevenlabs", {})
+# OpenAI Codex 구독 OAuth provider 전용 설정. API 키 방식 provider 들과 달리
+# access/refresh 토큰 수명주기 관리가 필요해 별도 섹션으로 분리한다.
+openai_codex = _cfg.get("openai_codex", {})
 ui = _cfg.get(
     "ui",
     {

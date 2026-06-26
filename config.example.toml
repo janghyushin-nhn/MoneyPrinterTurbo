@@ -67,6 +67,8 @@ coverr_api_keys = []
 #   ernie       (文心一言)
 #   modelscope  (魔搭社区)
 #   litellm     (100+ providers via LiteLLM gateway)
+#   openai_codex (OpenAI Codex subscription OAuth — see [openai_codex] section
+#                 and the risk/terms-of-service gate before enabling)
 llm_provider = "openai"
 
 ########## Pollinations AI Settings
@@ -313,6 +315,48 @@ max_concurrent_tasks = 5
 
 # 并发任务已满后的最大排队任务数，超过后接口返回 429，避免匿名请求无限堆积
 max_queued_tasks = 100
+
+
+# OpenAI Codex subscription OAuth provider.
+#
+# ⚠️ READ FIRST — RISK / TERMS-OF-SERVICE GATE (see CodexOAuth.md §3):
+#   OpenAI Codex/ChatGPT subscriptions are priced for INTERACTIVE use. Driving
+#   an automated batch pipeline (bulk script generation) with a subscription
+#   token may NOT be a use OpenAI permits, and can hit usage limits fast or
+#   risk account action. Enabling this is at your own risk. Safer free/cheap
+#   alternatives: Gemini free tier, local Ollama, or OpenRouter.
+#
+# To use: set llm_provider = "openai_codex" above, then configure below.
+[openai_codex]
+# Credential acquisition mode (the WebUI sets this for you via its buttons):
+#   "browser"     sign in via your web browser (PKCE loopback — the real Codex
+#                 flow; local machine only; endpoints UNVERIFIED, see OQ-3)
+#   "import"      reuse an existing Codex CLI token (run `codex login` first)
+#   "device_code" run a device-code OAuth login (Path B — UNVERIFIED, see OQ-3)
+auth_mode = "import"
+
+# Path A (import): where the Codex CLI stored its token.
+codex_auth_path = "~/.codex/auth.json"
+
+# Where this app keeps its own copy of the credentials (saved with 0600 perms
+# on POSIX). NEVER commit this file or paste its contents anywhere.
+token_store_path = "~/.moneyprinterturbo/codex_auth.json"
+
+# Model identifier (OQ-2: validate against a live account — this is a default,
+# not a guarantee).
+model = "gpt-5.5"
+
+# Responses API base URL (OQ-2: the subscription/Codex backend is not publicly
+# documented; override if OpenAI changes it).
+base_url = "https://chatgpt.com/backend-api/codex"
+
+# Advanced / rarely changed OAuth endpoints. Leave empty to use the built-in
+# defaults derived from the public Codex CLI (see codex_oauth/constants.py).
+# client_id = ""
+# token_url = ""
+# authorize_url = ""           # browser flow authorize endpoint
+# device_authorize_url = ""    # device-code flow endpoint
+# redirect_port = 1455         # localhost callback port for the browser flow
 
 
 [whisper]

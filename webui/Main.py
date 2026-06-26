@@ -252,6 +252,100 @@ def get_groq_model_ids(api_key: str, base_url: str) -> list[str]:
         logger.warning(f"failed to fetch groq models: {e}")
         return []
 
+
+def render_codex_oauth_settings():
+    """Dedicated LLM-settings panel for the OpenAI Codex OAuth provider.
+
+    Codex authenticates with OAuth tokens (not an API key), so this replaces the
+    generic API Key / Base Url / Model inputs with a sign-in panel. Settings are
+    persisted to the [openai_codex] config section.
+    """
+    from app.services import codex_oauth
+
+    st.warning(
+        tr(
+            "Codex OAuth drives your OpenAI subscription as an automated pipeline. "
+            "This may hit usage limits fast and may not be permitted by OpenAI's terms — use at your own risk."
+        )
+    )
+
+    try:
+        status = codex_oauth.auth_status()
+    except Exception as e:  # never let a status read break the settings page
+        status = {"authenticated": False, "reason": str(e)}
+
+    if status.get("authenticated"):
+        account = status.get("account_id") or "?"
+        if status.get("expired"):
+            st.warning(tr("Signed in") + f" (account: {account}) — " + tr("token expired, will refresh on next use."))
+        else:
+            mins = status.get("seconds_until_expiry")
+            extra = f" — {tr('expires in')} {mins // 60}m" if isinstance(mins, int) and mins > 0 else ""
+            st.success(tr("Signed in") + f" (account: {account}){extra}")
+    elif status.get("reason") == "quarantined":
+        st.error(tr("Credentials were revoked or expired. Please sign in again."))
+    else:
+        st.info(tr("Not signed in. Use a button below to authenticate."))
+
+    # Model identifier (persisted to [openai_codex]).
+    codex_model = config.openai_codex.get("model", "") or "gpt-5.5"
+    st_codex_model = st.text_input(
+        tr("Model Name"), value=codex_model, key="openai_codex_model_input"
+    )
+    if st_codex_model:
+        config.openai_codex["model"] = st_codex_model
+
+    col_browser, col_import = st.columns(2)
+    with col_browser:
+        if st.button(tr("Sign in with browser"), key="codex_browser_login", use_container_width=True):
+            config.openai_codex["auth_mode"] = "browser"
+            try:
+                with st.spinner(tr("Complete the sign-in in your browser...")):
+                    codex_oauth.login_via_browser(
+                        on_url=lambda u: st.markdown(f"[{tr('Open sign-in page')}]({u})"),
+                        open_browser=True,
+                        timeout=180,
+                    )
+                st.success(tr("Signed in."))
+                st.rerun()
+            except Exception as e:
+                st.error(f"{tr('Sign-in failed')}: {e}")
+    with col_import:
+        if st.button(tr("Import from Codex CLI"), key="codex_import_cli", use_container_width=True):
+            config.openai_codex["auth_mode"] = "import"
+            try:
+                codex_oauth.import_from_codex_cli()
+                st.success(tr("Imported credentials from Codex CLI."))
+                st.rerun()
+            except Exception as e:
+                st.error(f"{tr('Import failed')}: {e}")
+
+    if status.get("authenticated") or status.get("reason") == "quarantined":
+        if st.button(tr("Sign out"), key="codex_sign_out"):
+            try:
+                codex_oauth.sign_out()
+                st.rerun()
+            except Exception as e:
+                st.error(f"{tr('Sign-out failed')}: {e}")
+
+    with st.expander(tr("Advanced")):
+        st_codex_base = st.text_input(
+            tr("Base Url"),
+            value=config.openai_codex.get("base_url", ""),
+            key="openai_codex_base_url_input",
+            help=tr("Leave empty to use the default Codex endpoint."),
+        )
+        if st_codex_base:
+            config.openai_codex["base_url"] = st_codex_base
+
+    st.caption(
+        tr(
+            "Note: Codex OAuth endpoints are an unofficial/private API. If browser "
+            "sign-in fails, run `codex login` in a terminal, then click Import from Codex CLI."
+        )
+    )
+
+
 # 创建基础设置折叠框
 if not config.app.get("hide_config", False):
     with st.expander(tr("Basic Settings"), expanded=False):
@@ -307,6 +401,7 @@ if not config.app.get("hide_config", False):
                 ("MiMo", "mimo"),
                 ("Pollinations", "pollinations"),
                 ("LiteLLM", "litellm"),
+                ("OpenAI Codex (OAuth)", "openai_codex"),
             ]
             llm_provider_ids = [provider_id for _, provider_id in llm_provider_options]
             llm_provider_labels = {
@@ -591,74 +686,79 @@ if not config.app.get("hide_config", False):
             if tips and config.ui["language"] == "zh":
                 st.info(tips)
 
-            st_llm_api_key = st.text_input(
-                tr("API Key"), value=llm_api_key, type="password"
-            )
-            st_llm_base_url = st.text_input(tr("Base Url"), value=llm_base_url)
-            st_llm_model_name = ""
-            if llm_provider != "ernie":
-                if llm_provider == "groq":
-                    effective_api_key = st_llm_api_key or llm_api_key
-                    effective_base_url = st_llm_base_url or llm_base_url
-                    groq_models = get_groq_model_ids(
-                        api_key=effective_api_key,
-                        base_url=effective_base_url,
-                    )
-
-                    if groq_models:
-                        selected_index = 0
-                        if llm_model_name in groq_models:
-                            selected_index = groq_models.index(llm_model_name)
-
-                        st_llm_model_name = st.selectbox(
-                            tr("Model Name"),
-                            options=groq_models,
-                            index=selected_index,
-                            key="groq_model_name_select",
+            if llm_provider == "openai_codex":
+                # Codex 구독 OAuth는 API 키가 아니라 access/refresh 토큰을 사용하므로
+                # 일반 provider의 API Key/Base Url/Model 입력 대신 전용 패널을 그린다.
+                render_codex_oauth_settings()
+            else:
+                st_llm_api_key = st.text_input(
+                    tr("API Key"), value=llm_api_key, type="password"
+                )
+                st_llm_base_url = st.text_input(tr("Base Url"), value=llm_base_url)
+                st_llm_model_name = ""
+                if llm_provider != "ernie":
+                    if llm_provider == "groq":
+                        effective_api_key = st_llm_api_key or llm_api_key
+                        effective_base_url = st_llm_base_url or llm_base_url
+                        groq_models = get_groq_model_ids(
+                            api_key=effective_api_key,
+                            base_url=effective_base_url,
                         )
+
+                        if groq_models:
+                            selected_index = 0
+                            if llm_model_name in groq_models:
+                                selected_index = groq_models.index(llm_model_name)
+
+                            st_llm_model_name = st.selectbox(
+                                tr("Model Name"),
+                                options=groq_models,
+                                index=selected_index,
+                                key="groq_model_name_select",
+                            )
+                        else:
+                            st_llm_model_name = st.text_input(
+                                tr("Model Name"),
+                                value=llm_model_name,
+                                key="groq_model_name_input",
+                            )
+                            if effective_api_key:
+                                st.caption(
+                                    "Unable to load Groq model list right now. You can still enter a model name manually — note it won't be validated until generation."
+                                )
+                            else:
+                                st.caption(
+                                    "Add a Groq API key to load available models automatically."
+                                )
                     else:
                         st_llm_model_name = st.text_input(
                             tr("Model Name"),
                             value=llm_model_name,
-                            key="groq_model_name_input",
+                            key=f"{llm_provider}_model_name_input",
                         )
-                        if effective_api_key:
-                            st.caption(
-                                "Unable to load Groq model list right now. You can still enter a model name manually — note it won't be validated until generation."
-                            )
-                        else:
-                            st.caption(
-                                "Add a Groq API key to load available models automatically."
-                            )
+                    if st_llm_model_name:
+                        config.app[f"{llm_provider}_model_name"] = st_llm_model_name
                 else:
-                    st_llm_model_name = st.text_input(
-                        tr("Model Name"),
-                        value=llm_model_name,
-                        key=f"{llm_provider}_model_name_input",
-                    )
+                    st_llm_model_name = None
+
+                if st_llm_api_key:
+                    config.app[f"{llm_provider}_api_key"] = st_llm_api_key
+                if st_llm_base_url:
+                    config.app[f"{llm_provider}_base_url"] = st_llm_base_url
                 if st_llm_model_name:
                     config.app[f"{llm_provider}_model_name"] = st_llm_model_name
-            else:
-                st_llm_model_name = None
+                if llm_provider == "ernie":
+                    st_llm_secret_key = st.text_input(
+                        tr("Secret Key"), value=llm_secret_key, type="password"
+                    )
+                    config.app[f"{llm_provider}_secret_key"] = st_llm_secret_key
 
-            if st_llm_api_key:
-                config.app[f"{llm_provider}_api_key"] = st_llm_api_key
-            if st_llm_base_url:
-                config.app[f"{llm_provider}_base_url"] = st_llm_base_url
-            if st_llm_model_name:
-                config.app[f"{llm_provider}_model_name"] = st_llm_model_name
-            if llm_provider == "ernie":
-                st_llm_secret_key = st.text_input(
-                    tr("Secret Key"), value=llm_secret_key, type="password"
-                )
-                config.app[f"{llm_provider}_secret_key"] = st_llm_secret_key
-
-            if llm_provider == "cloudflare":
-                st_llm_account_id = st.text_input(
-                    tr("Account ID"), value=llm_account_id
-                )
-                if st_llm_account_id:
-                    config.app[f"{llm_provider}_account_id"] = st_llm_account_id
+                if llm_provider == "cloudflare":
+                    st_llm_account_id = st.text_input(
+                        tr("Account ID"), value=llm_account_id
+                    )
+                    if st_llm_account_id:
+                        config.app[f"{llm_provider}_account_id"] = st_llm_account_id
 
         # 右侧面板 - API 密钥设置
         with right_config_panel:

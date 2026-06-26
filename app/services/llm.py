@@ -173,6 +173,18 @@ def _generate_response(prompt: str) -> str:
             )
         else:
             api_version = ""  # for azure
+            if llm_provider == "openai_codex":
+                # Codex 구독 OAuth는 정적 api_key 대신 access/refresh 토큰을
+                # 사용하므로 아래 api_key/base_url 검증 로직을 타지 않고
+                # 전용 패키지에 위임한 뒤 즉시 반환한다. 예외는 바깥 except가
+                # 다른 provider와 동일하게 "Error: ..." 문자열로 감싼다.
+                from app.services import codex_oauth
+
+                # 다른 provider와 동일하게 정규화를 거쳐 <think> 추론 블록 제거,
+                # 개행 정리, 빈 응답 검증을 일관되게 적용한다.
+                return _normalize_text_response(
+                    codex_oauth.generate_text(prompt), llm_provider
+                )
             if llm_provider == "moonshot":
                 api_key = config.app.get("moonshot_api_key")
                 model_name = config.app.get("moonshot_model_name")
